@@ -471,7 +471,7 @@
                             '</el-select>' +
                         '</el-form-item>' +
                         '<el-form-item label="To" required>' +
-                            '<el-input v-model="sendForm.to" placeholder="recipient@example.com"></el-input>' +
+                            '<el-input v-model="sendForm.to" placeholder="recipient@example.com, another@example.com"></el-input>' +
                         '</el-form-item>' +
                         '<el-form-item label="Type" required>' +
                             '<el-select v-model="sendForm.type" style="width: 100%;">' +
@@ -707,8 +707,18 @@
 
                 handleSendEmail: function() {
                     var self = this;
-                    if (!self.sendForm.title || !self.sendForm.from || !self.sendForm.to || !self.sendForm.content) {
+                    if (!self.sendForm.title || !self.sendForm.from || !self.sendForm.content) {
                         self.$message.warning('Please fill in all required fields');
+                        return;
+                    }
+
+                    var recipients = self.sendForm.to.split(',')
+                        .map(function(email) { return email.trim(); })
+                        .filter(Boolean);
+
+                    recipients = Array.from(new Set(recipients));
+                    if (recipients.length === 0) {
+                        self.$message.warning('Please enter at least one recipient');
                         return;
                     }
 
@@ -717,7 +727,7 @@
                         method: 'POST',
                         body: JSON.stringify({
                             from: self.sendForm.from,
-                            to: self.sendForm.to,
+                            to: recipients.length === 1 ? recipients[0] : recipients,
                             title: self.sendForm.title,
                             content: self.sendForm.content,
                             type: self.sendForm.type,
