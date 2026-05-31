@@ -305,6 +305,15 @@ const sleep = (ms: number) => {
 const sendEmail = async (mail: PreparedMail) => {
     const protocol = mail.smtpConfig.protocol?.toLowerCase();
     const fromEmail = getSmtpFromEmail(mail.smtpConfig);
+    const recipients = Array.isArray(mail.to) ? mail.to : [mail.to];
+    const emailRecipients = recipients.length > 1
+        ? {
+            to: fromEmail,
+            bcc: recipients,
+        }
+        : {
+            to: recipients[0],
+        };
 
     // protocol=ssl 走 465 这类隐式 TLS；其他情况默认按 STARTTLS 方式发信。
     await WorkerMailer.send(
@@ -328,7 +337,7 @@ const sendEmail = async (mail: PreparedMail) => {
                 name: mail.finalSenderName,
                 email: fromEmail,
             },
-            to: mail.to,
+            ...emailRecipients,
             subject: mail.title,
             text: mail.text,
             html: mail.html,
