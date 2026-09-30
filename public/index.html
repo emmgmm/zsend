@@ -111,6 +111,27 @@
         .account-actions .el-button {
             margin-left: 0;
         }
+        .toolbar-hint {
+            color: #909399;
+            font-size: 12px;
+        }
+        .form-hint {
+            margin-top: 6px;
+            color: #909399;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        .key-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .key-value {
+            font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+            font-size: 12px;
+            color: #303133;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
@@ -161,11 +182,18 @@
                 '<el-card class="login-card">' +
                     '<h2 class="login-title">ZSend</h2>' +
                     '<el-form @submit.native.prevent="handleLogin">' +
-                        '<el-form-item label="Token">' +
+                        '<el-form-item label="Username">' +
                             '<el-input' +
-                                ' v-model="token"' +
+                                ' v-model="username"' +
+                                ' placeholder="Enter your username"' +
+                                ' @keyup.enter.native="handleLogin"' +
+                            '></el-input>' +
+                        '</el-form-item>' +
+                        '<el-form-item label="Password">' +
+                            '<el-input' +
+                                ' v-model="password"' +
                                 ' type="password"' +
-                                ' placeholder="Enter your token"' +
+                                ' placeholder="Enter your password"' +
                                 ' show-password' +
                                 ' @keyup.enter.native="handleLogin"' +
                             '></el-input>' +
@@ -182,28 +210,28 @@
                 '</el-card>' +
             '</div>',
             data: function() {
-                return { token: '', loading: false };
+                return { username: '', password: '', loading: false };
             },
             methods: {
-                // 登录：验证 token 后跳转到日志页
+                // 登录：校验用户名密码后保存会话 token 并跳转到日志页
                 handleLogin: function() {
-                    if (!this.token.trim()) {
-                        this.$message.warning('Please enter a token');
+                    if (!this.username.trim() || !this.password) {
+                        this.$message.warning('Please enter username and password');
                         return;
                     }
                     var self = this;
                     self.loading = true;
                     apiRequest('/api/v1/auth', {
                         method: 'POST',
-                        body: JSON.stringify({ token: self.token }),
+                        body: JSON.stringify({ username: self.username, password: self.password }),
                     })
                     .then(function(data) {
-                        if (data.code === 200) {
-                            sessionStorage.setItem('zsend_token', self.token);
+                        if (data.code === 200 && data.data && data.data.token) {
+                            sessionStorage.setItem('zsend_token', data.data.token);
                             self.$message.success('Login successful');
                             self.$router.push('/logs');
                         } else {
-                            self.$message.error(data.msg || 'Invalid token');
+                            self.$message.error(data.msg || 'Invalid username or password');
                         }
                     })
                     .catch(function() {
@@ -248,6 +276,9 @@
                             '</template>' +
                         '</el-table-column>' +
                         '<el-table-column prop="mail_type" label="Type" width="100"></el-table-column>' +
+                        '<el-table-column prop="api_key_name" label="Key" width="160" show-overflow-tooltip>' +
+                            '<template slot-scope="scope">{{ scope.row.api_key_name || dash }}</template>' +
+                        '</el-table-column>' +
                         '<el-table-column prop="content_text" label="Content" min-width="200">' +
                             '<template slot-scope="scope">' +
                                 '<el-tooltip v-if="scope.row.content_text" placement="top" :open-delay="300">' +
@@ -280,6 +311,7 @@
                     currentPage: 1,
                     pageSize: 20,
                     loading: false,
+                    dash: '\u2014',
                 };
             },
             mounted: function() {
@@ -763,7 +795,7 @@
                     };
                     this.apiCurl = [
                         'curl -X POST "' + window.location.origin + '/api/v1/send" \\',
-                        '  -H "Authorization: Bearer ' + getToken() + '" \\',
+                        '  -H "Authorization: Bearer <YOUR_API_KEY>" \\',
                         '  -H "Content-Type: application/json" \\',
                         "  -d '" + JSON.stringify(payload, null, 2) + "'",
                     ].join('\n');
@@ -803,6 +835,383 @@
             }
         };
 
+        // ─── 发信密钥管理组件 ──────────────────────────────────
+
+        var KeysView = {
+            template: '<div>' +
+                '<el-card>' +
+                    '<div slot="header"><strong>API Keys</strong></div>' +
+                    '<div class="toolbar">' +
+                        '<span class="toolbar-hint">Used as the Bearer token for POST /api/v1/send</span>' +
+                        '<div class="toolbar-actions">' +
+                            '<el-button type="primary" size="small" icon="el-icon-plus" @click="openDialog(null)">Add Key</el-button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<el-table :data="keys" border stripe style="width: 100%">' +
+                        '<el-table-column prop="name" label="Name" width="180" show-overflow-tooltip>' +
+                            '<template slot-scope="scope">{{ scope.row.name || dash }}</template>' +
+                        '</el-table-column>' +
+                        '<el-table-column label="Key" min-width="300">' +
+                            '<template slot-scope="scope">' +
+                                '<div class="key-cell">' +
+                                    '<code class="key-value">{{ revealed[scope.row.id] || scope.row.key_masked }}</code>' +
+                                    '<el-tooltip content="View" placement="top">' +
+                                        '<el-button type="text" size="small" icon="el-icon-view" @click="requestReveal(scope.row)"></el-button>' +
+                                    '</el-tooltip>' +
+                                    '<el-tooltip content="Copy" placement="top">' +
+                                        '<el-button type="text" size="small" icon="el-icon-document-copy" @click="requestCopy(scope.row)"></el-button>' +
+                                    '</el-tooltip>' +
+                                '</div>' +
+                            '</template>' +
+                        '</el-table-column>' +
+                        '<el-table-column label="Enabled" width="90">' +
+                            '<template slot-scope="scope">' +
+                                '<el-switch :value="scope.row.enabled === 1" @change="toggleEnabled(scope.row)"></el-switch>' +
+                            '</template>' +
+                        '</el-table-column>' +
+                        '<el-table-column label="Last Used" width="180">' +
+                            '<template slot-scope="scope">{{ scope.row.last_used_at ? formatDate(scope.row.last_used_at) : dash }}</template>' +
+                        '</el-table-column>' +
+                        '<el-table-column label="Created" width="180">' +
+                            '<template slot-scope="scope">{{ formatDate(scope.row.created_at) }}</template>' +
+                        '</el-table-column>' +
+                        '<el-table-column label="Actions" width="150" fixed="right">' +
+                            '<template slot-scope="scope">' +
+                                '<div class="account-actions">' +
+                                    '<el-tooltip content="Edit" placement="top">' +
+                                        '<el-button type="text" size="small" icon="el-icon-edit" @click="openDialog(scope.row)"></el-button>' +
+                                    '</el-tooltip>' +
+                                    '<el-popconfirm title="Delete this key?" @confirm="handleDelete(scope.row.id)">' +
+                                        '<el-button type="text" size="small" icon="el-icon-delete" style="color: #f56c6c;" slot="reference"></el-button>' +
+                                    '</el-popconfirm>' +
+                                '</div>' +
+                            '</template>' +
+                        '</el-table-column>' +
+                    '</el-table>' +
+                '</el-card>' +
+
+                '<el-dialog' +
+                    ' :title="dialogTitle"' +
+                    ' :visible.sync="dialogVisible"' +
+                    ' width="520px"' +
+                    ' :close-on-click-modal="false"' +
+                '>' +
+                    '<el-form :model="form" label-width="110px" size="small">' +
+                        '<el-form-item label="Name">' +
+                            '<el-input v-model="form.name" placeholder="e.g. Production"></el-input>' +
+                        '</el-form-item>' +
+                        '<el-form-item label="Key">' +
+                            '<el-input v-model="form.key" placeholder="Leave empty to auto-generate"></el-input>' +
+                            '<div class="form-hint">{{ form.id ? "Leave empty to keep the current key. Enter a new value to replace it." : "Leave empty to auto-generate a sk- key, or paste an existing key." }}</div>' +
+                        '</el-form-item>' +
+                        '<el-form-item label="Enabled">' +
+                            '<el-switch v-model="form.enabled"></el-switch>' +
+                        '</el-form-item>' +
+                    '</el-form>' +
+                    '<span slot="footer">' +
+                        '<el-button @click="dialogVisible = false">Cancel</el-button>' +
+                        '<el-button type="primary" :loading="saving" @click="handleSave">Save</el-button>' +
+                    '</span>' +
+                '</el-dialog>' +
+
+                '<el-dialog' +
+                    ' title="Confirm Password"' +
+                    ' :visible.sync="revealDialogVisible"' +
+                    ' width="420px"' +
+                    ' :close-on-click-modal="false"' +
+                    ' @closed="onRevealDialogClosed"' +
+                '>' +
+                    '<el-form @submit.native.prevent="confirmReveal">' +
+                        '<el-form-item>' +
+                            '<el-input' +
+                                ' v-model="revealPassword"' +
+                                ' type="password"' +
+                                ' show-password' +
+                                ' placeholder="Enter admin password"' +
+                                ' @keyup.enter.native="confirmReveal"' +
+                            '></el-input>' +
+                        '</el-form-item>' +
+                    '</el-form>' +
+                    '<span slot="footer">' +
+                        '<el-button @click="revealDialogVisible = false">Cancel</el-button>' +
+                        '<el-button type="primary" :loading="revealing" @click="confirmReveal">Confirm</el-button>' +
+                    '</span>' +
+                '</el-dialog>' +
+
+                '<el-dialog' +
+                    ' title="API Key"' +
+                    ' :visible.sync="keyDialogVisible"' +
+                    ' width="520px"' +
+                    ' :close-on-click-modal="false"' +
+                '>' +
+                    '<div class="form-hint" style="margin-top: 0; margin-bottom: 10px;">{{ keyDialogHint }}</div>' +
+                    '<pre class="curl-preview">{{ keyDialogValue }}</pre>' +
+                    '<span slot="footer">' +
+                        '<el-button @click="keyDialogVisible = false">Close</el-button>' +
+                        '<el-button type="primary" icon="el-icon-document-copy" @click="copyText(keyDialogValue)">Copy</el-button>' +
+                    '</span>' +
+                '</el-dialog>' +
+            '</div>',
+            data: function() {
+                return {
+                    keys: [],
+                    loading: false,
+                    dialogVisible: false,
+                    saving: false,
+                    dash: '\u2014',
+                    // 已解锁的完整 key 缓存（仅内存，刷新即失效）
+                    revealed: {},
+                    revealDialogVisible: false,
+                    revealPassword: '',
+                    revealing: false,
+                    revealTarget: null,
+                    revealAction: 'view',
+                    keyDialogVisible: false,
+                    keyDialogValue: '',
+                    keyDialogHint: '',
+                    form: {
+                        id: '',
+                        name: '',
+                        key: '',
+                        enabled: true,
+                    },
+                };
+            },
+            mounted: function() {
+                this.fetchKeys();
+            },
+            computed: {
+                dialogTitle: function() {
+                    return this.form.id ? 'Edit Key' : 'Add Key';
+                }
+            },
+            methods: {
+                formatDate: formatDate,
+
+                fetchKeys: function() {
+                    var self = this;
+                    self.loading = true;
+                    apiRequest('/api/v1/keys')
+                    .then(function(data) {
+                        if (data.code === 200) {
+                            self.keys = data.data.items;
+                        } else if (data.code === 401) {
+                            self.$message.error('Session expired');
+                            self.$router.push('/login');
+                        } else {
+                            self.$message.error(data.msg || 'Failed to fetch keys');
+                        }
+                    })
+                    .catch(function() {
+                        self.$message.error('Network error');
+                    })
+                    .finally(function() {
+                        self.loading = false;
+                    });
+                },
+
+                openDialog: function(row) {
+                    if (row) {
+                        this.form = {
+                            id: row.id,
+                            name: row.name || '',
+                            // 不再回填完整 key，留空表示保持原值
+                            key: '',
+                            enabled: row.enabled === 1,
+                        };
+                    } else {
+                        this.form = {
+                            id: '',
+                            name: '',
+                            key: '',
+                            enabled: true,
+                        };
+                    }
+                    this.dialogVisible = true;
+                },
+
+                handleSave: function() {
+                    var self = this;
+                    self.saving = true;
+
+                    var payload = {
+                        name: self.form.name || null,
+                        enabled: self.form.enabled ? 1 : 0,
+                    };
+
+                    // 新增时 key 可留空由后端自动生成；编辑时传空表示不修改
+                    if (!self.form.id || self.form.key) {
+                        payload.key = self.form.key || null;
+                    }
+
+                    var url = '/api/v1/keys';
+                    var method = 'POST';
+                    if (self.form.id) {
+                        url = '/api/v1/keys/' + self.form.id;
+                        method = 'PUT';
+                    }
+
+                    apiRequest(url, { method: method, body: JSON.stringify(payload) })
+                    .then(function(data) {
+                        if (data.code === 200) {
+                            self.$message.success(self.form.id ? 'Key updated' : 'Key created');
+                            self.dialogVisible = false;
+                            // 新建时接口是唯一返回完整 key 的时机，弹窗让用户先复制
+                            if (!self.form.id && data.data && data.data.key) {
+                                self.keyDialogValue = data.data.key;
+                                self.keyDialogHint = 'Copy this key now. Use the View button to see it again (requires your admin password).';
+                                self.keyDialogVisible = true;
+                                self.revealed[data.data.id] = data.data.key;
+                            }
+                            self.fetchKeys();
+                        } else {
+                            self.$message.error(data.msg || 'Operation failed');
+                        }
+                    })
+                    .catch(function() {
+                        self.$message.error('Network error');
+                    })
+                    .finally(function() {
+                        self.saving = false;
+                    });
+                },
+
+                handleDelete: function(id) {
+                    var self = this;
+                    apiRequest('/api/v1/keys/' + id, { method: 'DELETE' })
+                    .then(function(data) {
+                        if (data.code === 200) {
+                            self.$message.success('Key deleted');
+                            self.fetchKeys();
+                        } else {
+                            self.$message.error(data.msg || 'Delete failed');
+                        }
+                    })
+                    .catch(function() {
+                        self.$message.error('Network error');
+                    });
+                },
+
+                toggleEnabled: function(row) {
+                    var self = this;
+                    var newEnabled = row.enabled === 1 ? 0 : 1;
+                    apiRequest('/api/v1/keys/' + row.id, {
+                        method: 'PUT',
+                        body: JSON.stringify({ enabled: newEnabled }),
+                    })
+                    .then(function(data) {
+                        if (data.code === 200) {
+                            self.$message.success(newEnabled ? 'Key enabled' : 'Key disabled');
+                            self.fetchKeys();
+                        } else {
+                            self.$message.error(data.msg || 'Update failed');
+                        }
+                    })
+                    .catch(function() {
+                        self.$message.error('Network error');
+                    });
+                },
+
+                // 点击查看：已解锁则直接展示，否则先弹密码框
+                requestReveal: function(row) {
+                    var self = this;
+                    if (self.revealed[row.id]) {
+                        self.keyDialogValue = self.revealed[row.id];
+                        self.keyDialogHint = 'Full API key';
+                        self.keyDialogVisible = true;
+                        return;
+                    }
+                    self.openRevealDialog(row, 'view');
+                },
+
+                // 点击复制：已解锁则直接复制，否则先弹密码框
+                requestCopy: function(row) {
+                    var self = this;
+                    if (self.revealed[row.id]) {
+                        self.copyText(self.revealed[row.id]);
+                        return;
+                    }
+                    self.openRevealDialog(row, 'copy');
+                },
+
+                openRevealDialog: function(row, action) {
+                    this.revealTarget = row;
+                    this.revealAction = action;
+                    this.revealPassword = '';
+                    this.revealDialogVisible = true;
+                },
+
+                onRevealDialogClosed: function() {
+                    this.revealPassword = '';
+                    this.revealTarget = null;
+                },
+
+                // 校验管理员密码，通过后按需展示或复制完整 key
+                confirmReveal: function() {
+                    var self = this;
+                    if (!self.revealTarget) return;
+                    if (!self.revealPassword) {
+                        self.$message.warning('Please enter your admin password');
+                        return;
+                    }
+                    self.revealing = true;
+                    apiRequest('/api/v1/keys/' + self.revealTarget.id + '/reveal', {
+                        method: 'POST',
+                        body: JSON.stringify({ password: self.revealPassword }),
+                    })
+                    .then(function(data) {
+                        if (data.code === 200) {
+                            var key = data.data.key;
+                            self.revealed[self.revealTarget.id] = key;
+                            self.revealDialogVisible = false;
+                            if (self.revealAction === 'copy') {
+                                self.copyText(key);
+                            } else {
+                                self.keyDialogValue = key;
+                                self.keyDialogHint = 'Full API key';
+                                self.keyDialogVisible = true;
+                            }
+                        } else if (data.code === 401) {
+                            self.$message.error(data.msg || 'Invalid password');
+                        } else {
+                            self.$message.error(data.msg || 'Failed to reveal key');
+                        }
+                    })
+                    .catch(function() {
+                        self.$message.error('Network error');
+                    })
+                    .finally(function() {
+                        self.revealing = false;
+                    });
+                },
+
+                // 通用复制到剪贴板
+                copyText: function(text) {
+                    var self = this;
+                    var fallback = function() {
+                        var textarea = document.createElement('textarea');
+                        textarea.value = text;
+                        textarea.setAttribute('readonly', 'readonly');
+                        textarea.style.position = 'fixed';
+                        textarea.style.opacity = '0';
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(textarea);
+                        self.$message.success('Copied');
+                    };
+
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(text)
+                            .then(function() { self.$message.success('Copied'); })
+                            .catch(fallback);
+                    } else {
+                        fallback();
+                    }
+                },
+            }
+        };
+
         // ─── 带侧边栏的布局壳组件 ─────────────────────────────
 
         var AppLayout = {
@@ -823,6 +1232,10 @@
                         '<el-menu-item index="/accounts">' +
                             '<i class="el-icon-setting"></i>' +
                             '<span>SMTP Accounts</span>' +
+                        '</el-menu-item>' +
+                        '<el-menu-item index="/keys">' +
+                            '<i class="el-icon-key"></i>' +
+                            '<span>API Keys</span>' +
                         '</el-menu-item>' +
                     '</el-menu>' +
                     '<el-menu' +
@@ -847,10 +1260,15 @@
                 }
             },
             methods: {
-                // 退出登录，清除 token 后跳转登录页
+                // 退出登录：通知服务端销毁会话并清除本地 token
                 handleLogout: function() {
-                    sessionStorage.removeItem('zsend_token');
-                    this.$router.push('/login');
+                    var self = this;
+                    apiRequest('/api/v1/logout', { method: 'POST' })
+                    .catch(function() { /* 退出失败也照常清理本地状态 */ })
+                    .finally(function() {
+                        sessionStorage.removeItem('zsend_token');
+                        self.$router.push('/login');
+                    });
                 }
             }
         };
@@ -866,6 +1284,7 @@
                     { path: '', redirect: '/logs' },
                     { path: 'logs', component: LogsView },
                     { path: 'accounts', component: AccountsView },
+                    { path: 'keys', component: KeysView },
                 ],
             },
             { path: '*', redirect: '/logs' },

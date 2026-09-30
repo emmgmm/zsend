@@ -12,8 +12,8 @@ ZSend is an email sending gateway deployed on Cloudflare Workers. It provides a 
 - Provides a unified HTTP API for sending emails
 - Supports `text`, `html`, and `markdown` content
 - Automatic retry: retries once when SMTP sending fails
-- Sending logs: records a log for every email sending request
-- Authenticated access: the send endpoint is protected with Bearer Token authentication
+- Sending logs: records a log for every email sending request, including which API key was used
+- Authenticated access: the admin panel uses username/password login; the send endpoint is protected with API keys
 
 ## Screenshots
 
@@ -65,9 +65,16 @@ Copy the generated `database_id` into the `database_id` field in `wrangler.jsonc
 ### 3. Set Environment Variables
 
 ```bash
-wrangler secret put TOKEN
-# Enter any string. Later API calls must use this string as the Bearer Token.
+# Admin login username
+wrangler secret put ADMIN_USERNAME
+
+# Admin login password
+wrangler secret put ADMIN_PASSWORD
 ```
+
+`ADMIN_USERNAME` and `ADMIN_PASSWORD` are used for the Web admin login. To change the password later, update the secret and redeploy.
+
+API keys for `POST /api/v1/send` are created in the Web UI (API Keys page), not with environment variables.
 
 ### 4. Deploy the Project
 
@@ -80,13 +87,15 @@ After deployment succeeds, the access URL will be displayed, for example: `https
 
 ### 5. Configure SMTP Accounts
 
-After deployment, visit `https://zsend.your-subdomain.workers.dev` to view sending logs and configure SMTP accounts through the Web UI.
+After deployment, visit `https://zsend.your-subdomain.workers.dev`, log in with your admin username and password, then configure SMTP accounts and create API keys through the Web UI.
 
 ### 6. Test Sending
 
+Create an API key on the **API Keys** page, then use it as the Bearer token:
+
 ```bash
 curl -X POST "https://zsend.your-subdomain.workers.dev/api/v1/send" \
-  -H "Authorization: Bearer your-token" \
+  -H "Authorization: Bearer sk-xxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "from": "no-reply@example.com",
@@ -102,7 +111,7 @@ curl -X POST "https://zsend.your-subdomain.workers.dev/api/v1/send" \
 
 ```http
 POST /api/v1/send
-Authorization: Bearer <TOKEN>
+Authorization: Bearer <API_KEY>
 Content-Type: application/json
 ```
 
@@ -132,7 +141,7 @@ Field reference:
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/v1/send" \
-  -H "Authorization: Bearer your-token" \
+  -H "Authorization: Bearer sk-xxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "from": "no-reply@example.com",

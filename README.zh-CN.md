@@ -12,8 +12,8 @@ ZSend 是一个部署在 Cloudflare Workers 上的邮件发送网关，提供 We
 - 提供统一HTTP API 发送邮件
 - 支持 `text`、`html`、`markdown` 内容
 - 自动重试：SMTP 发送失败时自动重试一次
-- 发信日志：每次发信请求都会记录日志
-- 鉴权访问：发信接口使用 Bearer Token 鉴权
+- 发信日志：每次发信请求都会记录日志，并标明使用哪个密钥发送
+- 鉴权访问：后台使用用户名密码登录，发信接口使用 API 密钥
 
 ## 部分截图
 
@@ -65,9 +65,16 @@ database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ### 3. 设置环境变量
 
 ```bash
-wrangler secret put TOKEN
-# 输入任意字符串，后续调用接口需要使用这个字符串做为 Bearer Token
+# 后台登录用户名
+wrangler secret put ADMIN_USERNAME
+
+# 后台登录密码
+wrangler secret put ADMIN_PASSWORD
 ```
+
+`ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 用于 Web 后台登录。后续如需修改密码，重新设置该 secret 并重新部署即可。
+
+用于 `POST /api/v1/send` 的 API 密钥在 Web 后台的「API Keys」页面创建，不再使用环境变量。
 
 ### 4. 部署项目
 
@@ -80,13 +87,15 @@ wrangler deploy
 
 ### 5. 配置 SMTP 账号
 
-部署完成后，访问 `https://zsend.your-subdomain.workers.dev` 即可通过 Web UI 查看发信日志和配置SMTP账号。
+部署完成后，访问 `https://zsend.your-subdomain.workers.dev`，使用后台用户名和密码登录，即可通过 Web UI 查看发信日志、配置 SMTP 账号并创建 API 密钥。
 
 ### 6. 测试发信
 
+先在「API Keys」页面创建一个密钥，再把它作为 Bearer Token 使用：
+
 ```bash
 curl -X POST "https://zsend.your-subdomain.workers.dev/api/v1/send" \
-  -H "Authorization: Bearer your-token" \
+  -H "Authorization: Bearer sk-xxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "from": "no-reply@example.com",
@@ -102,7 +111,7 @@ curl -X POST "https://zsend.your-subdomain.workers.dev/api/v1/send" \
 
 ```http
 POST /api/v1/send
-Authorization: Bearer <TOKEN>
+Authorization: Bearer <API_KEY>
 Content-Type: application/json
 ```
 
@@ -132,7 +141,7 @@ Content-Type: application/json
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/v1/send" \
-  -H "Authorization: Bearer your-token" \
+  -H "Authorization: Bearer sk-xxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "from": "no-reply@example.com",

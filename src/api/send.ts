@@ -37,6 +37,7 @@ type PreparedMail = {
     html: string;
     contentText: string;
     requestIp?: string | null;
+    apiKeyName?: string | null;
 };
 
 type SendMailResult = {
@@ -357,6 +358,7 @@ const writeMailLog = async (db: AppD1Database | undefined, mail: PreparedMail, r
         errorMessage: result.errorMessage,
         requestIp: mail.requestIp,
         contentText: mail.contentText,
+        apiKeyName: mail.apiKeyName,
     });
 };
 
@@ -478,6 +480,13 @@ export const send = async (c: Context<AppBindings>) => {
         const finalSenderName = sender_name?.trim() || smtpConfig.senderName;
         const requestIp = c.req.header("CF-Connecting-IP") || c.req.header("X-Forwarded-For") || null;
 
+        // 记录发起来源：密钥调用记录密钥备注（存快照，删除密钥后日志仍可读），后台控制台发信标记为 Web 控制台。
+        const authType = c.get("authType");
+        const apiKey = c.get("apiKey");
+        const apiKeyName = authType === "apikey"
+            ? (apiKey?.name?.trim() || "未命名密钥")
+            : "Web 控制台";
+
         // 发信和日志都放到 waitUntil 中异步执行，接口快速返回，但日志里记录真实的最终发信结果。
         c.executionCtx.waitUntil(
             (async () => {
@@ -492,6 +501,7 @@ export const send = async (c: Context<AppBindings>) => {
                     html,
                     contentText,
                     requestIp,
+                    apiKeyName,
                 };
 
                 const result = await sendEmailWithRetry(mail);

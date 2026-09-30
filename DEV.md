@@ -28,8 +28,8 @@ cp .dev.vars.example .dev.vars
 
 Then edit `.dev.vars` and fill in your local values for:
 
-- `TOKEN`
-- `SMTP_CONFIGS`
+- `ADMIN_USERNAME`
+- `ADMIN_PASSWORD`
 
 Start the local Worker dev server:
 
@@ -52,51 +52,41 @@ Current bindings used by the Worker:
 
 | Binding | Type | Required | Description |
 | --- | --- | --- | --- |
-| `TOKEN` | string | Yes | Bearer token required by `POST /api/v1/send` |
-| `SMTP_CONFIGS` | array or JSON string | Yes | SMTP account list used to match the `from` address |
-| `DB` | D1 binding | Yes | Stores mail delivery logs in `mail_logs` |
+| `ADMIN_USERNAME` | string | Yes | Admin login username for the Web UI |
+| `ADMIN_PASSWORD` | string | Yes | Admin login password (plain text) |
+| `DB` | D1 binding | Yes | Stores mail logs, SMTP accounts, API keys, and admin sessions |
 
-### `SMTP_CONFIGS` shape
+SMTP accounts and API keys are managed in the Web UI and stored in D1; they are no longer configured through environment variables.
 
-Each SMTP item should look like this:
-
-```json
-[
-  {
-    "host": "smtp.example.com",
-    "port": 587,
-    "username": "smtp-login@example.com",
-    "password": "your-password",
-    "fromEmail": "no-reply@example.com",
-    "protocol": "tls",
-    "senderName": "ZSend"
-  }
-]
-```
-
-Fields:
-
-- `host`: SMTP server hostname
-- `port`: SMTP server port
-- `username`: SMTP login account
-- `password`: SMTP password
-- `fromEmail`: optional actual sender email address; falls back to `username` when missing or empty
-- `protocol`: use `ssl` for implicit TLS, otherwise the code treats it as STARTTLS
-- `senderName`: default display name for that SMTP account
-
-The current code expects `SMTP_CONFIGS` as a JSON string. Use `.dev.vars` locally and Cloudflare secrets for production.
+The admin account is read from the `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables. To change the password, update the `ADMIN_PASSWORD` secret and redeploy.
 
 ### Local `.dev.vars` example
 
 ```env
-TOKEN=your-local-token
-SMTP_CONFIGS=[{"host":"smtp.example.com","port":587,"username":"smtp-login@example.com","password":"your-smtp-password","fromEmail":"no-reply@example.com","protocol":"tls","senderName":"ZSend"}]
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your-local-password
 ```
 
 Files:
 
 - `.dev.vars`: local-only real values
 - `.dev.vars.example`: committed template without real secrets
+
+## Authentication Model
+
+There are two kinds of credentials:
+
+- **Admin session**: `POST /api/v1/auth` verifies the username/password and returns a session token (valid for 7 days). The Web UI stores it in `sessionStorage` and sends it as `Authorization: Bearer <token>`. It protects the admin endpoints (logs, SMTP accounts, API keys) and can also be used to send mail from the Web UI.
+- **API key**: created on the API Keys page (`sk-...` by default, or a custom value). It is only accepted by `POST /api/v1/send` and is recorded in the mail log.
+
+`POST /api/v1/send` accepts either credential.
+
+### API key management
+
+- `GET /api/v1/keys` lists keys with the secret masked (`sk-a****wxyz`) in both the `key` and `key_masked` fields; the full value is never returned.
+- `POST /api/v1/keys/:id/reveal` requires the admin password in the body (`{ "password": "..." }`) and returns the full key. The Web UI uses this for the View/Copy buttons.
+- `POST /api/v1/keys` (create) is the only other response that contains the full key, so copy it right after creation.
+
 
 ## API Debugging
 
@@ -120,7 +110,7 @@ Example response:
 
 ```http
 POST /api/v1/send
-Authorization: Bearer <TOKEN>
+Authorization: Bearer <API_KEY>
 Content-Type: application/json
 ```
 
@@ -139,7 +129,7 @@ Request body:
 
 Request fields:
 
-- `from`: required, the server first tries to match `SMTP_CONFIGS[].fromEmail`; if no match is found, it falls back to `SMTP_CONFIGS[].username`
+- `from`: required, the server matches the sender against the SMTP accounts configured in the Web UI (by `from_email`, then by `username`)
 - `to`: required, recipient email address
 - `title`: required, mail subject
 - `content`: required, mail body
@@ -150,7 +140,7 @@ Example `curl`:
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/v1/send" \
-  -H "Authorization: Bearer your-token" \
+  -H "Authorization: Bearer sk-xxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "from": "no-reply@example.com",
@@ -178,7 +168,7 @@ Accepted response example:
 
 Important behavior:
 
-- Invalid or missing Bearer token returns `401`
+- Invalid or missing credentials (admin session or API key) returns `401`
 - Invalid JSON body returns `400`
 - Missing required fields returns `400`
 - Unsupported `type` returns `400`
