@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { index } from "./api/index";
 import { send } from "./api/send";
 import { auth, logout, me } from "./api/auth";
-import { logs } from "./api/logs";
+import { logs, removeLogs } from "./api/logs";
 import { listKeys, createKey, updateKey, removeKey, revealKey } from "./api/keys";
 import { listAccounts, getAccount, createAccount, updateAccount, removeAccount } from "./api/accounts";
 import { indexPage } from "./pages/index";
@@ -21,6 +21,7 @@ router.post("/api/v1/logout", adminAuth(), logout);
 router.get("/api/v1/me", adminAuth(), me);
 
 router.get("/api/v1/logs", adminAuth(), logs);
+router.post("/api/v1/logs/delete", adminAuth(), removeLogs);
 
 // 发信：管理员会话或 API 密钥均可
 router.post("/api/v1/send", sendAuth(), send);

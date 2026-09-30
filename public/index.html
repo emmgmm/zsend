@@ -25,9 +25,10 @@
         }
 
         /* 主布局：侧边栏 + 内容区 */
-        .app-layout { min-height: 100vh; }
+        .app-layout { height: 100vh; overflow: hidden; }
         .app-aside {
             background: #304156;
+            height: 100vh;
             overflow: hidden;
             display: flex;
             flex-direction: column;
@@ -49,22 +50,30 @@
             flex-shrink: 0;
         }
         .app-aside .logout-item {
-            position: fixed;
-            left: 0;
-            bottom: 0;
-            width: 200px;
-            height: 56px;
+            margin-top: auto;
             border-top: 1px solid #3d4e5f;
             flex: none;
             flex-shrink: 0;
             overflow: hidden;
-            z-index: 10;
         }
         .app-aside .logout-item .el-menu-item {
             height: 56px;
             line-height: 56px;
         }
-        .app-main { padding: 20px; overflow-y: auto; }
+        .app-aside .app-version {
+            flex-shrink: 0;
+            padding: 10px 0;
+            text-align: center;
+            font-size: 12px;
+            color: #8a97a5;
+            white-space: nowrap;
+        }
+        .app-main {
+            padding: 20px;
+            height: 100vh;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
 
         /* 搜索栏 */
         .search-bar {
@@ -260,8 +269,22 @@
                             ' style="width: 300px;"' +
                         '></el-input>' +
                         '<el-button type="primary" @click="fetchLogs" :loading="loading">Search</el-button>' +
+                        '<el-popconfirm' +
+                            ' title="Delete selected logs?"' +
+                            ' :disabled="selected.length === 0"' +
+                            ' @confirm="handleDeleteSelected"' +
+                        '>' +
+                            '<el-button' +
+                                ' slot="reference"' +
+                                ' type="danger"' +
+                                ' icon="el-icon-delete"' +
+                                ' :disabled="selected.length === 0"' +
+                                ' style="margin-left: auto;"' +
+                            '>Delete Selected</el-button>' +
+                        '</el-popconfirm>' +
                     '</div>' +
-                    '<el-table :data="logs" border stripe style="width: 100%">' +
+                    '<el-table :data="logs" border stripe style="width: 100%" @selection-change="handleSelectionChange">' +
+                        '<el-table-column type="selection" width="46"></el-table-column>' +
                         '<el-table-column prop="created_at" label="Time" width="180">' +
                             '<template slot-scope="scope">{{ formatDate(scope.row.created_at) }}</template>' +
                         '</el-table-column>' +
@@ -309,8 +332,10 @@
                     logs: [],
                     total: 0,
                     currentPage: 1,
-                    pageSize: 20,
+                    pageSize: 10,
                     loading: false,
+                    selected: [],
+                    deleting: false,
                     dash: '\u2014',
                 };
             },
@@ -344,6 +369,7 @@
                         if (data.code === 200) {
                             self.logs = data.data.items;
                             self.total = data.data.total;
+                            self.selected = [];
                         } else if (data.code === 401) {
                             self.$message.error('Session expired');
                             self.$router.push('/login');
@@ -370,6 +396,45 @@
                 handleClear: function() {
                     this.currentPage = 1;
                     this.fetchLogs();
+                },
+                handleSelectionChange: function(selection) {
+                    this.selected = selection;
+                },
+                handleDeleteSelected: function() {
+                    var self = this;
+                    if (self.selected.length === 0) {
+                        return;
+                    }
+
+                    var ids = self.selected.map(function(row) { return row.id; });
+                    self.deleting = true;
+
+                    apiRequest('/api/v1/logs/delete', {
+                        method: 'POST',
+                        body: JSON.stringify({ ids: ids }),
+                    })
+                    .then(function(data) {
+                        if (data.code === 200) {
+                            var deleted = data.data && typeof data.data.deleted === 'number' ? data.data.deleted : ids.length;
+                            self.$message.success('Deleted ' + deleted + ' log(s)');
+                            // 若当前页被删空且不是第一页，则回退一页，避免停在空页
+                            if (self.logs.length === ids.length && self.currentPage > 1) {
+                                self.currentPage = self.currentPage - 1;
+                            }
+                            self.fetchLogs();
+                        } else if (data.code === 401) {
+                            self.$message.error('Session expired');
+                            self.$router.push('/login');
+                        } else {
+                            self.$message.error(data.msg || 'Delete failed');
+                        }
+                    })
+                    .catch(function() {
+                        self.$message.error('Network error');
+                    })
+                    .finally(function() {
+                        self.deleting = false;
+                    });
                 }
             }
         };
@@ -1216,7 +1281,7 @@
 
         var AppLayout = {
             template: '<el-container class="app-layout">' +
-                '<el-aside width="200px" class="app-aside">' +
+                '<el-aside width="220px" class="app-aside">' +
                     '<div class="menu-header">ZSend</div>' +
                     '<el-menu' +
                         ' :default-active="activeMenu"' +
@@ -1249,6 +1314,7 @@
                             '<span>Logout</span>' +
                         '</el-menu-item>' +
                     '</el-menu>' +
+                    '<div class="app-version">v__APP_VERSION__</div>' +
                 '</el-aside>' +
                 '<el-main class="app-main">' +
                     '<router-view></router-view>' +

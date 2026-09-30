@@ -155,7 +155,7 @@ export const queryMailLogs = async (
     }
 
     const page = params.page && params.page > 0 ? params.page : 1;
-    const pageSize = params.pageSize && params.pageSize > 0 ? params.pageSize : 20;
+    const pageSize = params.pageSize && params.pageSize > 0 ? params.pageSize : 10;
     const offset = (page - 1) * pageSize;
 
     let countQuery = "SELECT COUNT(*) as total FROM mail_logs";
@@ -189,6 +189,21 @@ export const queryMailLogs = async (
         pageSize,
         totalPages: Math.ceil(total / pageSize),
     };
+};
+
+// 按 id 批量删除日志；调用方需先校验 ids 非空且数量在安全范围内。
+export const deleteMailLogs = async (db: AppD1Database | undefined, ids: string[]): Promise<number> => {
+    if (!db) {
+        throw new Error("D1 binding DB is not configured");
+    }
+
+    if (ids.length === 0) {
+        return 0;
+    }
+
+    const placeholders = ids.map(() => "?").join(", ");
+    const result = await db.prepare(`DELETE FROM mail_logs WHERE id IN (${placeholders})`).bind(...ids).run();
+    return result.meta.changes;
 };
 
 // ─── SMTP 账号管理 ────────────────────────────────────────────
