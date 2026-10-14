@@ -145,12 +145,15 @@ const isValidEmail = (email: string) => {
 };
 
 const buildHtml = async (title: string, content: string, type: MailType) => {
-    // markdown 交给 marked 转成 HTML；text 保留换行；html 则直接使用调用方传入的内容。
+    // html 类型直接发送调用方传入的原始内容，不做任何模板包装。
+    if (type === "html") {
+        return content;
+    }
+
+    // markdown 交给 marked 转成 HTML；text 保留换行。
     const body = type === "markdown"
         ? String(await marked.parse(content))
-        : type === "html"
-            ? content
-            : `<p>${escapeHtml(content).replaceAll("\n", "<br />")}</p>`;
+        : `<p>${escapeHtml(content).replaceAll("\n", "<br />")}</p>`;
 
     return `
 <!DOCTYPE html>
